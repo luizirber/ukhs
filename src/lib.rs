@@ -103,8 +103,8 @@ impl<'a> ExactSizeIterator for UKHSIterator<'a> {}
 ///     # fn main() -> Result<(), Error> {
 ///     let seq = b"ACACCGTAGCCTCCAGATGC";
 ///     let it = UKHSHashIterator::new(seq, 7, 20)?;
-///     let ukhs: Vec<String> = it.collect();
-///     assert_eq!(ukhs, ["ACACCGT", "CCGTAGC", "AGCCTCC", "GCCTCCA"]);
+///     let ukhs: Vec<u64> = it.collect();
+///     assert_eq!(ukhs, [0xfbd9591aa929c685, 0x9cd9a1bcb779d6ad, 0x46fa47d28c0ffba5, 0xf482addc6edbc920]);
 ///     # Ok(())
 ///     # }
 /// ```
@@ -153,12 +153,12 @@ impl<'a> UKHSHashIterator<'a> {
 }
 
 impl<'a> Iterator for UKHSHashIterator<'a> {
-    type Item = String;
+    type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(current_hashed) = self.nthash_iter.next() {
-            if let Some(kmer) = UKHS_NTHASHES.get(&current_hashed) {
-                return Some((*kmer).to_string());
+            if let Some(_) = UKHS_NTHASHES.get(&current_hashed) {
+                return Some(current_hashed);
             };
         }
         None
@@ -184,8 +184,12 @@ mod test {
         assert_eq!(ukhs, ["ACACCGT", "CCGTAGC", "AGCCTCC", "GCCTCCA"]);
 
         let it = UKHSHashIterator::new(seq, 7, 20).unwrap();
-        let ukhs_hash: Vec<String> = it.collect();
+        let ukhs_hash: Vec<u64> = it.collect();
+        let ukhs_unhash: Vec<String> = ukhs_hash
+            .iter()
+            .map(|x| UKHS_NTHASHES.get(x).unwrap().to_string())
+            .collect();
 
-        assert_eq!(ukhs, ukhs_hash);
+        assert_eq!(ukhs, ukhs_unhash);
     }
 }

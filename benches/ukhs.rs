@@ -30,7 +30,7 @@ fn ukhs_bench(c: &mut Criterion) {
         b.iter(|| {
             let iter = UKHSHashIterator::new(i.as_bytes(), 7, 20).unwrap();
             //  iter.for_each(drop);
-            let _res: Vec<String> = iter.collect();
+            let _res: Vec<u64> = iter.collect();
         })
     });
 
