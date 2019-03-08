@@ -2,7 +2,8 @@ pub mod errors;
 
 use std::str;
 
-use failure::Error;
+use failure::{Error, SyncFailure};
+use nthash::NtHashForwardIterator;
 use phf;
 
 use crate::errors::UKHSError;
@@ -92,6 +93,84 @@ impl<'a> Iterator for UKHSIterator<'a> {
 
 impl<'a> ExactSizeIterator for UKHSIterator<'a> {}
 
+/// An iterator for finding universal hitting k-mers in a sequence.
+/// It uses ntHash for efficient k-mer hashing.
+///
+/// ```
+///     # use failure::Error;
+///     use ukhs::UKHSHashIterator;
+///
+///     # fn main() -> Result<(), Error> {
+///     let seq = b"ACACCGTAGCCTCCAGATGC";
+///     let it = UKHSHashIterator::new(seq, 7, 20)?;
+///     let ukhs: Vec<String> = it.collect();
+///     assert_eq!(ukhs, ["ACACCGT", "CCGTAGC", "AGCCTCC", "GCCTCCA"]);
+///     # Ok(())
+///     # }
+/// ```
+#[derive(Debug)]
+pub struct UKHSHashIterator<'a> {
+    nthash_iter: NtHashForwardIterator<'a>,
+    k: usize,
+    w: usize,
+    max_idx: usize,
+}
+
+impl<'a> UKHSHashIterator<'a> {
+    /// Creates a new UKHSHashIterator with internal state properly initialized.
+    pub fn new(seq: &'a [u8], k: usize, w: usize) -> Result<UKHSHashIterator<'a>, Error> {
+        if k > seq.len() {
+            return Err(UKHSError::KSizeOutOfRange {
+                ksize: k,
+                sequence: String::from_utf8(seq.to_vec()).unwrap(),
+            }
+            .into());
+        }
+
+        if k > w {
+            return Err(UKHSError::KSizeOutOfWRange { ksize: k, wsize: w }.into());
+        }
+
+        if w > seq.len() {
+            return Err(UKHSError::WSizeOutOfRange {
+                wsize: w,
+                sequence: String::from_utf8(seq.to_vec()).unwrap(),
+            }
+            .into());
+        }
+
+        let max_idx = seq.len() - k + 1;
+
+        let nthash_iter = NtHashForwardIterator::new(seq, k).map_err(SyncFailure::new)?;
+
+        Ok(UKHSHashIterator {
+            nthash_iter,
+            k,
+            w,
+            max_idx,
+        })
+    }
+}
+
+impl<'a> Iterator for UKHSHashIterator<'a> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(current_hashed) = self.nthash_iter.next() {
+            if let Some(kmer) = UKHS_NTHASHES.get(&current_hashed) {
+                return Some((*kmer).to_string());
+            };
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.max_idx, Some(self.max_idx))
+    }
+}
+
+impl<'a> ExactSizeIterator for UKHSHashIterator<'a> {}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -103,5 +182,10 @@ mod test {
         let ukhs: Vec<String> = it.collect();
 
         assert_eq!(ukhs, ["ACACCGT", "CCGTAGC", "AGCCTCC", "GCCTCCA"]);
+
+        let it = UKHSHashIterator::new(seq, 7, 20).unwrap();
+        let ukhs_hash: Vec<String> = it.collect();
+
+        assert_eq!(ukhs, ukhs_hash);
     }
 }
