@@ -19,3 +19,11 @@ nthash = { version = "0.4.1", path = "../nthash" }
 phf = { version = "0.7.24"}
 failure = "0.1.5"
 nthash = { version = "0.4.1", path = "../nthash" }
+
+[dev-dependencies]
+criterion = "^0.2"
+rand = "^0.5"
+
+[[bench]]
+name = "ukhs"
+harness = false
