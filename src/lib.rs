@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 pub mod errors;
 
 use std::str;
@@ -157,7 +159,7 @@ impl<'a> Iterator for UKHSHashIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(current_hashed) = self.nthash_iter.next() {
-            if let Some(_) = UKHS_NTHASHES.get(&current_hashed) {
+            if UKHS_NTHASHES.get(&current_hashed).is_some() {
                 return Some(current_hashed);
             };
         }
