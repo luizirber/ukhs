@@ -17,12 +17,12 @@ bench = false
 
 [build-dependencies]
 phf_codegen = "0.7.24"
-nthash = { version = "0.4.1", path = "../nthash" }
+nthash = "0.4.3"
 
 [dependencies]
 phf = { version = "0.7.24"}
 failure = "0.1.5"
-nthash = { version = "0.4.1", path = "../nthash" }
+nthash = "0.4.3"
 
 [dev-dependencies]
 criterion = "^0.2"
