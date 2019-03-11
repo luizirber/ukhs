@@ -1,6 +1,6 @@
 [package]
 name = "ukhs"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Luiz Irber <luiz.irber@gmail.com>"]
 description = "Universal K-mer Hitting Sets"
 repository = "https://github.com/luizirber/ukhs"
