@@ -1,0 +1,9 @@
+[package]
+name = "boomphf"
+version = "0.1.0"
+authors = ["Luiz Irber <luiz.irber@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+boomphf-sys = { path = "../boomphf-sys" }
+tempfile = "3.0.7"

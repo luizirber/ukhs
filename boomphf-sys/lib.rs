@@ -1,5 +1,5 @@
 pub mod boomphf {
-    use std::os::raw::{c_float, c_int, c_uchar, c_ulonglong, c_void};
+    use std::os::raw::c_void;
 
     pub type Mphf = c_void;
     pub type MphfMutPtr = *mut Mphf;
@@ -7,29 +7,25 @@ pub mod boomphf {
     #[link(name = "bbhashadapter", kind = "static")]
     extern "C" {
         #[link_name = "mphf_new"]
-        pub fn new_mphf(
-            nelem: c_ulonglong,
-            kmers: *const c_ulonglong,
-            num_thread: c_int,
-            gamma: c_float,
-        ) -> MphfMutPtr;
+        pub fn new_mphf(nelem: u64, kmers: *const u64, num_thread: i32, gamma: f64) -> MphfMutPtr;
 
         #[link_name = "mphf_lookup"]
-        pub fn lookup(this: MphfMutPtr, element: c_ulonglong) -> c_ulonglong;
+        pub fn lookup(this: MphfMutPtr, element: u64) -> u64;
 
         #[link_name = "mphf_save"]
-        pub fn save(this: MphfMutPtr, path: *const c_uchar, path_size: c_ulonglong);
+        pub fn save(this: MphfMutPtr, path: *const u8, path_size: u64);
 
         #[link_name = "mphf_load"]
-        pub fn load(path: *const c_uchar, path_size: c_ulonglong) -> MphfMutPtr;
+        pub fn load(path: *const u8, path_size: u64) -> MphfMutPtr;
     }
 
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::boomphf::{load, lookup, new_mphf, save};
     use tempfile::NamedTempFile;
+
+    use crate::boomphf::{load, lookup, new_mphf, save};
 
     #[test]
     fn it_works() {

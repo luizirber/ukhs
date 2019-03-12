@@ -22,7 +22,7 @@ phf_codegen = "0.7.24"
 nthash = "0.4.3"
 
 [dependencies]
-boomphf-sys = { path = "./boomphf-sys" }
+boomphf = { path = "./boomphf" }
 phf = { version = "0.7.24"}
 failure = "0.1.5"
 nthash = "0.4.3"
