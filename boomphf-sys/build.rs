@@ -3,7 +3,7 @@ fn main() {
     c.cpp(true);
     c.warnings(false);
     c.flag("-fno-rtti");
-    c.flag("-std=gnu++11");
+    c.flag("-std=c++11");
     //c.flag("-fno-exceptions");
     c.include("BBHash");
     c.file("ffi.cpp");
