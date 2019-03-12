@@ -68,32 +68,23 @@ impl<'a> UKHS {
     }
 
     /// Creates a new UKHSIterator with internal state properly initialized.
-    pub fn iter_sequence(&'a self, seq: &'a [u8]) -> Result<UKHSIterator<'a>, Error> {
-        if self.k > seq.len() {
-            return Err(UKHSError::KSizeOutOfRange {
-                ksize: self.k,
-                sequence: String::from_utf8(seq.to_vec()).unwrap(),
-            }
-            .into());
-        }
+    pub fn iter_sequence(&'a self, seq: &'a [u8]) -> UKHSIterator<'a> {
+        let mut max_idx = seq.len() - self.k + 1;
 
-        if self.w > seq.len() {
-            return Err(UKHSError::WSizeOutOfRange {
-                wsize: self.w,
-                sequence: String::from_utf8(seq.to_vec()).unwrap(),
-            }
-            .into());
+        if self.k > seq.len() || self.w > seq.len() {
+            // In these cases the sequence is too small for having any k-mers or
+            // w-mers, so the iterator will return None right away.
+            max_idx = 0;
         }
 
         let current_idx = 0;
-        let max_idx = seq.len() - self.k + 1;
 
-        Ok(UKHSIterator {
+        UKHSIterator {
             seq,
             ukhs: self,
             current_idx,
             max_idx,
-        })
+        }
     }
 
     /// Creates a new UKHSHashIterator with internal state properly initialized.
@@ -165,7 +156,7 @@ impl<'a> UKHS {
 ///     let seq = b"ACACCGTAGCCTCCAGATGC";
 ///     let ukhs = UKHS::new(7, 20)?;
 ///
-///     let it = ukhs.iter_sequence(seq)?;
+///     let it = ukhs.iter_sequence(seq);
 ///     let ukhs: Vec<(String, String)> = it.collect();
 ///     assert_eq!(ukhs,
 ///                [
@@ -297,7 +288,7 @@ mod test {
         let seq = b"ACACCGTAGCCTCCAGATGC";
         let ukhs = UKHS::new(7, 20).unwrap();
 
-        let it = ukhs.iter_sequence(seq).unwrap();
+        let it = ukhs.iter_sequence(seq);
         let mut unikmers: Vec<String> = it.map(|(_, x)| x).collect();
         unikmers.sort_unstable();
 

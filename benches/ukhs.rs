@@ -22,7 +22,7 @@ fn ukhs_bench(c: &mut Criterion) {
         let ukhs = UKHS::new(7, 20).unwrap();
         b.iter(|| {
             //  iter.for_each(drop);
-            let iter = ukhs.iter_sequence(i.as_bytes()).unwrap();
+            let iter = ukhs.iter_sequence(i.as_bytes());
             let _res: Vec<(String, String)> = iter.collect();
         })
     });
