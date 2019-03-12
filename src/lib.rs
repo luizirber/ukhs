@@ -2,19 +2,32 @@
 
 pub mod errors;
 
+use std::collections::HashMap;
 use std::str;
 
+use boomphf::MPHF;
 use failure::{Error, SyncFailure};
-use nthash::NtHashForwardIterator;
-use phf;
+use lazy_static::lazy_static;
+use nthash::{ntf64, NtHashForwardIterator};
 
 use crate::errors::UKHSError;
 
-include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
+lazy_static! {
+    static ref UKHS_HASHES: HashMap<(usize, usize), &'static str> = {
+        let mut map = HashMap::new();
+        map.insert((7, 20), include_str!("../data/res_7_20_4_0.txt"));
+        // TODO: add others
+        map
+    };
+}
 
 pub struct UKHS {
     k: usize,
     w: usize,
+    mphf: MPHF,
+    revmap: Vec<u64>,
+    kmers: Vec<String>,
+    kmers_hashes: Vec<u64>,
 }
 
 impl<'a> UKHS {
@@ -23,9 +36,35 @@ impl<'a> UKHS {
             return Err(UKHSError::KSizeOutOfWRange { ksize: k, wsize: w }.into());
         }
 
-        // TODO: initialize boomphf with proper UKHS from DOCKS
+        let entries = UKHS_HASHES[&(k, w)];
+        let mut kmers: Vec<String> = entries
+            .split('\n')
+            .filter_map(|s| {
+                if s.len() == k {
+                    Some(String::from(s))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        kmers.sort_unstable();
 
-        Ok(UKHS { k, w })
+        let kmers_hashes: Vec<u64> = kmers.iter().map(|h| ntf64(h.as_bytes(), 0, k)).collect();
+
+        let mphf = MPHF::new(kmers_hashes.clone(), 1, 1.0); // TODO: any way to avoid this clone?
+        let mut revmap = vec![0; kmers_hashes.len()];
+        for hash in &kmers_hashes {
+            revmap[mphf.lookup(*hash).unwrap() as usize] = *hash;
+        }
+
+        Ok(UKHS {
+            k,
+            w,
+            mphf,
+            revmap,
+            kmers,
+            kmers_hashes,
+        })
     }
 
     /// Creates a new UKHSIterator with internal state properly initialized.
@@ -94,10 +133,22 @@ impl<'a> UKHS {
         })
     }
 
-    pub fn kmer_for_ukhs_hash(hash: u64) -> Option<String> {
-        // TODO: don't use static UKHS_NTHASHES
-        if let Some(kmer) = UKHS_NTHASHES.get(&hash) {
-            Some((*kmer).to_string())
+    pub fn contains(&self, hash: u64) -> bool {
+        if let Some(pos) = self.mphf.lookup(hash) {
+            if self.revmap[pos as usize] == hash {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn contains_kmer(&self, kmer: &str) -> bool {
+        self.kmers.binary_search(&kmer.into()).is_ok()
+    }
+
+    pub fn kmer_for_ukhs_hash(&self, hash: u64) -> Option<String> {
+        if let Some(pos) = self.kmers_hashes.iter().position(|&x| x == hash) {
+            Some(self.kmers[pos].clone())
         } else {
             None
         }
@@ -148,8 +199,7 @@ impl<'a> Iterator for UKHSIterator<'a> {
 
             self.current_idx += 1;
 
-            // TODO: don't use static UKHS_HASHES
-            if UKHS_HASHES.contains(current_kmer) {
+            if self.ukhs.contains_kmer(current_kmer) {
                 return Some((current_wmer.into(), current_kmer.into()));
             };
         }
@@ -224,8 +274,7 @@ impl<'a> Iterator for UKHSHashIterator<'a> {
                 self.current_w_hash = self.nthash_w_iter.next().unwrap();
             }
 
-            // TODO: don't use static UKHS_NTHASHES
-            if UKHS_NTHASHES.get(&k_hash).is_some() {
+            if self.ukhs.contains(k_hash) {
                 return Some((self.current_w_hash, k_hash));
             };
         }
@@ -258,10 +307,7 @@ mod test {
         let ukhs_hash: Vec<(u64, u64)> = it.collect();
         let mut ukhs_unhash: Vec<String> = ukhs_hash
             .iter()
-            .map(|(_, hash)| {
-                // TODO: use instance method, not class method
-                UKHS::kmer_for_ukhs_hash(*hash).unwrap()
-            })
+            .map(|(_, hash)| ukhs.kmer_for_ukhs_hash(*hash).unwrap())
             .collect();
         ukhs_unhash.sort_unstable();
 
