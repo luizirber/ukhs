@@ -3,7 +3,7 @@ extern crate criterion;
 
 use criterion::{Bencher, Criterion, Fun};
 use rand::distributions::{Distribution, Uniform};
-use ukhs::{UKHSHashIterator, UKHSIterator};
+use ukhs::UKHS;
 
 fn ukhs_bench(c: &mut Criterion) {
     let range = Uniform::from(0..4);
@@ -19,18 +19,20 @@ fn ukhs_bench(c: &mut Criterion) {
         .collect::<String>();
 
     let ukhs_it = Fun::new("ukhs_iterator", |b: &mut Bencher, i: &String| {
+        let ukhs = UKHS::new(7, 20).unwrap();
         b.iter(|| {
-            let iter = UKHSIterator::new(i.as_bytes(), 7, 20).unwrap();
             //  iter.for_each(drop);
-            let _res: Vec<String> = iter.collect();
+            let iter = ukhs.iter_sequence(i.as_bytes()).unwrap();
+            let _res: Vec<(String, String)> = iter.collect();
         })
     });
 
     let ukhs_hash_it = Fun::new("ukhs_hash_iterator", |b: &mut Bencher, i: &String| {
+        let ukhs = UKHS::new(7, 20).unwrap();
         b.iter(|| {
-            let iter = UKHSHashIterator::new(i.as_bytes(), 7, 20).unwrap();
+            let iter = ukhs.hash_iter_sequence(i.as_bytes()).unwrap();
             //  iter.for_each(drop);
-            let _res: Vec<u64> = iter.collect();
+            let _res: Vec<(u64, u64)> = iter.collect();
         })
     });
 
