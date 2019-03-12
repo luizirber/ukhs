@@ -1,0 +1,3 @@
+[submodule "boomphf-sys/BBHash"]
+	path = boomphf-sys/BBHash
+	url = https://github.com/rizkg/BBHash.git
