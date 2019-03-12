@@ -16,6 +16,8 @@ lazy_static! {
     static ref UKHS_HASHES: HashMap<(usize, usize), &'static str> = {
         let mut map = HashMap::new();
         map.insert((7, 20), include_str!("../data/res_7_20_4_0.txt"));
+        map.insert((9, 20), include_str!("../data/res_9_20_4_0.txt"));
+        map.insert((9, 30), include_str!("../data/res_9_30_4_0.txt"));
         // TODO: add others
         map
     };
@@ -36,7 +38,8 @@ impl<'a> UKHS {
             return Err(UKHSError::KSizeOutOfWRange { ksize: k, wsize: w }.into());
         }
 
-        let entries = UKHS_HASHES[&(k, w)];
+        let w_round = (w / 10) * 10;
+        let entries = UKHS_HASHES[&(k, w_round)];
         let mut kmers: Vec<String> = entries
             .split('\n')
             .filter_map(|s| {
@@ -47,6 +50,9 @@ impl<'a> UKHS {
                 }
             })
             .collect();
+
+        // TODO: is the order relevant for interoperability?
+        // for now this is necessary to make binary_search work
         kmers.sort_unstable();
 
         let kmers_hashes: Vec<u64> = kmers.iter().map(|h| ntf64(h.as_bytes(), 0, k)).collect();
@@ -65,6 +71,19 @@ impl<'a> UKHS {
             kmers,
             kmers_hashes,
         })
+    }
+
+    pub fn len(&self) -> usize {
+        self.kmers_hashes.len()
+    }
+
+    pub fn query_bucket(&self, hash: u64) -> Option<usize> {
+        if let Some(pos) = self.mphf.lookup(hash) {
+            if self.revmap[pos as usize] == hash {
+                return Some(pos as usize);
+            }
+        }
+        None
     }
 
     /// Creates a new UKHSIterator with internal state properly initialized.
