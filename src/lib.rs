@@ -77,6 +77,14 @@ impl<'a> UKHS {
         self.kmers_hashes.len()
     }
 
+    pub fn K(&self) -> usize {
+        self.k
+    }
+
+    pub fn W(&self) -> usize {
+        self.w
+    }
+
     pub fn query_bucket(&self, hash: u64) -> Option<usize> {
         if let Some(pos) = self.mphf.lookup(hash) {
             if self.revmap[pos as usize] == hash {
