@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 use std::str;
 
-use boomphf::MPHF;
+use bbhash::MPHF;
 use failure::{Error, SyncFailure};
 use lazy_static::lazy_static;
 use nthash::{ntf64, NtHashForwardIterator};

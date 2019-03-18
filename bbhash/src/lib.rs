@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use boomphf_sys::boomphf;
+use bbhash_sys::boomphf;
 
 pub struct MPHF {
     inner: boomphf::MphfMutPtr,
