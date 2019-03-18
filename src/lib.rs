@@ -2,7 +2,8 @@
 
 pub mod errors;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::iter::Peekable;
 use std::str;
 
 use boomphf::MPHF;
@@ -77,11 +78,11 @@ impl<'a> UKHS {
         self.kmers_hashes.len()
     }
 
-    pub fn K(&self) -> usize {
+    pub fn k(&self) -> usize {
         self.k
     }
 
-    pub fn W(&self) -> usize {
+    pub fn w(&self) -> usize {
         self.w
     }
 
@@ -104,12 +105,11 @@ impl<'a> UKHS {
             max_idx = 0;
         }
 
-        let current_idx = 0;
-
         UKHSIterator {
             seq,
             ukhs: self,
-            current_idx,
+            current_k_idx: 0,
+            current_w_idx: 0,
             max_idx,
         }
     }
@@ -132,22 +132,37 @@ impl<'a> UKHS {
             .into());
         }
 
-        let max_idx = seq.len() - self.k + 1;
-        let current_idx = 0;
-
-        let nthash_k_iter = NtHashForwardIterator::new(seq, self.k).map_err(SyncFailure::new)?;
-        let mut nthash_w_iter =
-            NtHashForwardIterator::new(seq, self.w).map_err(SyncFailure::new)?;
+        let mut nthash_k_iter = NtHashForwardIterator::new(seq, self.k)
+            .map_err(SyncFailure::new)?
+            .peekable();
+        let mut nthash_w_iter = NtHashForwardIterator::new(seq, self.w)
+            .map_err(SyncFailure::new)?
+            .peekable();
 
         let current_w_hash = nthash_w_iter.next().unwrap();
+        let mut current_unikmers = VecDeque::with_capacity(self.k);
+
+        for i in 0..=self.w - self.k {
+            let k_hash = nthash_k_iter.next().unwrap();
+
+            if self.contains(k_hash) {
+                current_unikmers.push_back((i, k_hash));
+            }
+        }
+
+        let current_w_idx = 0;
+        let current_k_idx = 0;
+        let max_k_pos = seq.len() - self.k + 1;
 
         Ok(UKHSHashIterator {
             nthash_k_iter,
             nthash_w_iter,
             ukhs: self,
             current_w_hash,
-            current_idx,
-            max_idx,
+            current_w_idx,
+            current_k_idx,
+            max_k_pos,
+            current_unikmers,
         })
     }
 
@@ -198,7 +213,8 @@ impl<'a> UKHS {
 pub struct UKHSIterator<'a> {
     seq: &'a [u8],
     ukhs: &'a UKHS,
-    current_idx: usize,
+    current_k_idx: usize,
+    current_w_idx: usize,
     max_idx: usize,
 }
 
@@ -206,18 +222,25 @@ impl<'a> Iterator for UKHSIterator<'a> {
     type Item = (String, String);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.current_idx != self.max_idx {
+        while self.current_k_idx != self.max_idx {
+            let last_k_pos = self.current_w_idx + self.ukhs.w() - self.ukhs.k() + 1;
+
+            if self.current_k_idx == last_k_pos {
+                self.current_w_idx += 1;
+                self.current_k_idx = self.current_w_idx;
+            }
+
             let current_kmer =
-                str::from_utf8(&self.seq[self.current_idx..self.current_idx + self.ukhs.k])
+                str::from_utf8(&self.seq[self.current_k_idx..self.current_k_idx + self.ukhs.k])
                     .unwrap();
 
-            let wmer_start = self.current_idx / self.ukhs.w;
-            let current_wmer =
-                str::from_utf8(&self.seq[wmer_start..wmer_start + self.ukhs.w]).unwrap();
-
-            self.current_idx += 1;
+            self.current_k_idx += 1;
 
             if self.ukhs.contains_kmer(current_kmer) {
+                let wmer_start = self.current_w_idx;
+                let current_wmer =
+                    str::from_utf8(&self.seq[wmer_start..wmer_start + self.ukhs.w]).unwrap();
+
                 return Some((current_wmer.into(), current_kmer.into()));
             };
         }
@@ -273,34 +296,74 @@ impl<'a> ExactSizeIterator for UKHSIterator<'a> {}
 /// ```
 pub struct UKHSHashIterator<'a> {
     ukhs: &'a UKHS,
-    nthash_k_iter: NtHashForwardIterator<'a>,
-    nthash_w_iter: NtHashForwardIterator<'a>,
+    nthash_k_iter: Peekable<NtHashForwardIterator<'a>>,
+    nthash_w_iter: Peekable<NtHashForwardIterator<'a>>,
     current_w_hash: u64,
-    current_idx: usize,
-    max_idx: usize,
+    current_w_idx: usize,
+    current_k_idx: usize,
+    max_k_pos: usize,
+    current_unikmers: VecDeque<(usize, u64)>,
 }
-
-impl<'a> UKHSHashIterator<'a> {}
 
 impl<'a> Iterator for UKHSHashIterator<'a> {
     type Item = (u64, u64);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(k_hash) = self.nthash_k_iter.next() {
-            self.current_idx += 1;
-            if self.current_idx % self.ukhs.w == 0 {
-                self.current_w_hash = self.nthash_w_iter.next().unwrap();
+        loop {
+            // We're past the last possible k-mer; stop.
+            if self.current_k_idx >= self.max_k_pos {
+                return None;
             }
 
-            if self.ukhs.contains(k_hash) {
-                return Some((self.current_w_hash, k_hash));
-            };
+            let last_k_pos = self.current_w_idx + self.ukhs.w() - self.ukhs.k() + 1;
+
+            // First state: draining queue
+            if self.current_k_idx < last_k_pos {
+                self.current_k_idx += 1;
+
+                if let Some((pos, k_hash)) = self
+                    .current_unikmers
+                    .iter()
+                    .find(|(p, _)| *p >= self.current_k_idx - 1)
+                {
+                    self.current_k_idx = *pos + 1;
+                    return Some((self.current_w_hash, *k_hash));
+                } else {
+                    // In this case we went through all the current_unikmers;
+                    // set current_k_idx to last_k_pos
+                    self.current_k_idx = last_k_pos;
+                }
+            } else {
+                // Second state:
+                // - if front of current_unikmers < current_idx, pop it
+
+                self.current_w_idx += 1;
+
+                if let Some((pos, _)) = self.current_unikmers.front() {
+                    if *pos < self.current_w_idx {
+                        self.current_unikmers.pop_front();
+                    }
+                }
+
+                // - push_back next k-mer (if it is inside next w-mer)
+                let new_k_hash = self.nthash_k_iter.next().unwrap();
+
+                if self.ukhs.contains(new_k_hash) {
+                    self.current_unikmers.push_back((last_k_pos, new_k_hash));
+                }
+
+                // - advance to next w-mer
+                self.current_w_hash = self.nthash_w_iter.next().unwrap();
+
+                self.current_k_idx = self.current_w_idx;
+            }
         }
-        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.max_idx, Some(self.max_idx))
+        // TODO: max_idx is the is the maximum,
+        // but very unlikely (every k-mer would have to be a UKHS k-mer.
+        self.nthash_k_iter.size_hint()
     }
 }
 
@@ -310,10 +373,15 @@ impl<'a> ExactSizeIterator for UKHSHashIterator<'a> {}
 mod test {
     use super::*;
 
+    use std::collections::HashSet;
+    use std::iter::FromIterator;
+
     #[test]
     fn basic_check() {
         let seq = b"ACACCGTAGCCTCCAGATGC";
-        let ukhs = UKHS::new(7, 20).unwrap();
+        let w = 20;
+        let k = 7;
+        let ukhs = UKHS::new(k, w).unwrap();
 
         let it = ukhs.iter_sequence(seq);
         let mut unikmers: Vec<String> = it.map(|(_, x)| x).collect();
@@ -323,10 +391,13 @@ mod test {
 
         let it = ukhs.hash_iter_sequence(seq).unwrap();
         let ukhs_hash: Vec<(u64, u64)> = it.collect();
-        let mut ukhs_unhash: Vec<String> = ukhs_hash
+        assert!(ukhs_hash.len() >= seq.len() - w + 1);
+
+        let mut ukhs_unhash_set: HashSet<String> = ukhs_hash
             .iter()
             .map(|(_, hash)| ukhs.kmer_for_ukhs_hash(*hash).unwrap())
             .collect();
+        let mut ukhs_unhash = Vec::<String>::from_iter(ukhs_unhash_set.into_iter());
         ukhs_unhash.sort_unstable();
 
         assert_eq!(unikmers, ukhs_unhash);
@@ -337,6 +408,106 @@ mod test {
                 (0x37137c91412bb512, 0x9cd9a1bcb779d6ad),
                 (0x37137c91412bb512, 0x46fa47d28c0ffba5),
                 (0x37137c91412bb512, 0xf482addc6edbc920)
+            ]
+        );
+    }
+
+    #[test]
+    fn longer_check() {
+        let seq = b"ACACCGTAGCCTCCAGATGCGTAG";
+        /*
+                 ACACCGTAGCCTCCAGATGCGTAG
+                 *  *   **       *
+
+        w-mer 0: ACACCGTAGCCTCCAGATGC
+                 *  *   **
+        w-mer 1: CACCGTAGCCTCCAGATGCG
+                   *   **
+        w-mer 2: ACCGTAGCCTCCAGATGCGT
+                  *   **
+        w-mer 3: CCGTAGCCTCCAGATGCGTA
+                 *   **       *
+        w-mer 4: CGTAGCCTCCAGATGCGTAG
+                    **       *
+        */
+        let k = 7;
+        let w = 20;
+        let ukhs = UKHS::new(k, w).unwrap();
+
+        let it = ukhs.iter_sequence(seq);
+        let mut unikmers: Vec<String> = it.map(|(_, x)| x).collect();
+
+        assert_eq!(
+            unikmers,
+            [
+                "ACACCGT", "CCGTAGC", "AGCCTCC", "GCCTCCA", // w-mer 0
+                "CCGTAGC", "AGCCTCC", "GCCTCCA", // w-mer 1
+                "CCGTAGC", "AGCCTCC", "GCCTCCA", // w-mer 2
+                "CCGTAGC", "AGCCTCC", "GCCTCCA", "ATGCGTA", // w-mer 3
+                "AGCCTCC", "GCCTCCA", "ATGCGTA" // w-mer 4
+            ]
+        );
+
+        let it = ukhs.hash_iter_sequence(seq).unwrap();
+        let ukhs_hash: Vec<(u64, u64)> = it.collect();
+
+        assert!(
+            ukhs_hash.len() >= seq.len() - w + 1,
+            "iter len {}, should be at least {}",
+            ukhs_hash.len(),
+            seq.len() - w + 1
+        );
+
+        let mut ukhs_unhash: Vec<String> = ukhs_hash
+            .iter()
+            .map(|(_, hash)| ukhs.kmer_for_ukhs_hash(*hash).unwrap())
+            .collect();
+
+        assert_eq!(unikmers, ukhs_unhash);
+
+        assert_eq!(
+            ukhs_hash,
+            [
+                // w-mer 0
+                // (ACACCGTAGCCTCCAGATGC, ACACCGT)
+                (0x37137c91412bb512, 0xfbd9591aa929c685),
+                // (ACACCGTAGCCTCCAGATGC, CCGTAGC)
+                (0x37137c91412bb512, 0x9cd9a1bcb779d6ad),
+                // (ACACCGTAGCCTCCAGATGC, AGCCTCC)
+                (0x37137c91412bb512, 0x46fa47d28c0ffba5),
+                // (ACACCGTAGCCTCCAGATGC, GCCTCCA)
+                (0x37137c91412bb512, 0xf482addc6edbc920),
+                // w-mer 1
+                // (CACCGTAGCCTCCAGATGCG, CCGTAGC)
+                (0xf52d9b92474381bf, 0x9cd9a1bcb779d6ad),
+                // (CACCGTAGCCTCCAGATGCG, AGCCTCC)
+                (0xf52d9b92474381bf, 0x46fa47d28c0ffba5),
+                // (CACCGTAGCCTCCAGATGCG, GCCTCCA)
+                (0xf52d9b92474381bf, 0xf482addc6edbc920),
+                // w-mer 2
+                // (ACCGTAGCCTCCAGATGCGT, CCGTAGC)
+                (0xdb5854d371a65e15, 0x9cd9a1bcb779d6ad),
+                // (ACCGTAGCCTCCAGATGCGT, AGCCTCC)
+                (0xdb5854d371a65e15, 0x46fa47d28c0ffba5),
+                // (ACCGTAGCCTCCAGATGCGT, GCCTCCA)
+                (0xdb5854d371a65e15, 0xf482addc6edbc920),
+                // w-mer 3
+                // (CCGTAGCCTCCAGATGCGTA, CCGTAGC)
+                (0x31020e7531c970e0, 0x9cd9a1bcb779d6ad),
+                // (CCGTAGCCTCCAGATGCGTA, AGCCTCC)
+                (0x31020e7531c970e0, 0x46fa47d28c0ffba5),
+                // (CCGTAGCCTCCAGATGCGTA, GCCTCCA)
+                (0x31020e7531c970e0, 0xf482addc6edbc920),
+                // (CCGTAGCCTCCAGATGCGTA, ATGCGTA)
+                (0x31020e7531c970e0, 0x6903a07436e4ffa1),
+                // w-mer 4
+                // (CCGTAGCCTCCAGATGCGTA, CCGTAGC)
+                // (CGTAGCCTCCAGATGCGTAG, AGCCTCC)
+                (0x5a6008385506dbd8, 0x46fa47d28c0ffba5),
+                // (CGTAGCCTCCAGATGCGTAG, GCCTCCA)
+                (0x5a6008385506dbd8, 0xf482addc6edbc920),
+                // (CGTAGCCTCCAGATGCGTAG, TGCGTAG)
+                (0x5a6008385506dbd8, 0x6903a07436e4ffa1)
             ]
         );
     }
