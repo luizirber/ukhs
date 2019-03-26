@@ -24,6 +24,7 @@ lazy_static! {
     };
 }
 
+#[derive(Clone)]
 pub struct UKHS {
     k: usize,
     w: usize,

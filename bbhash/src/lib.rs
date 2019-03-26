@@ -6,6 +6,14 @@ pub struct MPHF {
     inner: boomphf::MphfMutPtr,
 }
 
+// TODO: this should be OK, because once it's build you can't modified it
+// BUT IS IT?!?!
+impl Clone for MPHF {
+    fn clone(&self) -> Self {
+        MPHF { inner: self.inner }
+    }
+}
+
 impl MPHF {
     pub fn new(elements: Vec<u64>, num_threads: i32, gamma: f64) -> MPHF {
         let inner = unsafe {
@@ -39,6 +47,10 @@ impl MPHF {
         MPHF { inner }
     }
 }
+
+// TODO: need to make sure this is true!
+unsafe impl Send for MPHF {}
+unsafe impl Sync for MPHF {}
 
 #[cfg(test)]
 mod tests {
