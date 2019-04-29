@@ -29,6 +29,7 @@ script:
   - cargo fmt -- --check
   - cargo build
   - cargo test
+  - cargo test --no-default-features --features boomphf_mphf
   - cargo bench
 after_success:
   - cargo coverage

@@ -54,6 +54,7 @@ unsafe impl Sync for MPHF {}
 
 #[cfg(test)]
 mod tests {
+    use boomphf;
     use tempfile::NamedTempFile;
 
     use crate::MPHF;
@@ -74,4 +75,36 @@ mod tests {
         assert_eq!(loaded_mphf.lookup(9).unwrap(), 8);
         assert_eq!(loaded_mphf.lookup(25), None);
     }
+
+    #[test]
+    fn boomphf_oracle_smoketest() {
+        // sample set of objects
+        let possible_objects = vec![1, 10, 1000, 23, 457, 856, 845, 124, 912];
+        let n = possible_objects.len();
+
+        // generate a minimal perfect hash function of these items
+        let boo = boomphf::Mphf::new(1.7, &possible_objects.clone());
+        let bb = MPHF::new(possible_objects.clone(), 1, 1.7);
+
+        // Get hash value of all objects
+        let mut boo_hashes = Vec::new();
+        let mut bb_hashes = Vec::new();
+        for v in possible_objects {
+            let boo_hash = boo.hash(&v);
+            boo_hashes.push(boo_hash);
+            let bb_hash = bb.lookup(v).unwrap();
+            bb_hashes.push(bb_hash);
+
+            dbg!((boo_hash, bb_hash));
+            //assert_eq!(boo_hash, bb_hash);
+        }
+        boo_hashes.sort();
+        bb_hashes.sort();
+
+        // Expected hash output is set of all integers from 0..n
+        let expected_hashes: Vec<u64> = (0..n as u64).collect();
+        assert!(boo_hashes == expected_hashes);
+        assert!(bb_hashes == expected_hashes)
+    }
+
 }

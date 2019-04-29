@@ -11,3 +11,9 @@ license = "MIT/Apache-2.0"
 [dependencies]
 bbhash-sys = { version = "0.1.0", path = "../bbhash-sys" }
 tempfile = "3.0.7"
+
+[dev-dependencies]
+criterion = "^0.2"
+rand = "^0.5"
+proptest = "0.9.1"
+boomphf = { version = "0.5.0", git = "https://github.com/10XGenomics/rust-boomphf.git" }

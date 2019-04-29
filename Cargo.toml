@@ -15,13 +15,20 @@ edition = "2018"
 name = "ukhs"
 bench = false
 
+[features]
+bbhash_mphf = ["bbhash"]
+boomphf_mphf = ["boomphf"]
+default = ["bbhash_mphf"]
+
 [workspace]
 
 [dependencies]
-bbhash = { version = "0.1.1", path = "./bbhash" }
+bbhash = { version = "0.1.1", path = "./bbhash", optional = true}
 failure = "0.1.5"
 nthash = "0.4.3"
 lazy_static = "1.3.0"
+boomphf = { git = "https://github.com/luizirber/rust-boomphf", branch = "shift_32", optional = true }
+cfg-if = "0.1.7"
 
 [dev-dependencies]
 criterion = "^0.2"

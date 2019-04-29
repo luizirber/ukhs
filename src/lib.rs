@@ -5,11 +5,21 @@ pub mod errors;
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 use std::str;
+use std::sync::Arc;
 
-use bbhash::MPHF;
+use cfg_if::cfg_if;
 use failure::{Error, SyncFailure};
 use lazy_static::lazy_static;
 use nthash::{ntf64, NtHashForwardIterator};
+
+cfg_if! {
+    if #[cfg(feature = "boomphf_mphf")] {
+        //type MPHF = boomphf::Mphf<u64>;
+        type MPHF = boomphf::hashmap::BoomHashMap<u64, String>;
+    } else {
+        use bbhash::MPHF;
+    }
+}
 
 use crate::errors::UKHSError;
 
@@ -28,12 +38,13 @@ lazy_static! {
 pub struct UKHS {
     k: usize,
     w: usize,
-    mphf: MPHF,
+    mphf: Arc<MPHF>,
     revmap: Vec<u64>,
     kmers: Vec<String>,
     kmers_hashes: Vec<u64>,
 }
 
+#[cfg(feature = "bbhash_mphf")]
 impl<'a> UKHS {
     pub fn new(k: usize, w: usize) -> Result<UKHS, Error> {
         if k > w {
@@ -60,6 +71,7 @@ impl<'a> UKHS {
         let kmers_hashes: Vec<u64> = kmers.iter().map(|h| ntf64(h.as_bytes(), 0, k)).collect();
 
         let mphf = MPHF::new(kmers_hashes.clone(), 1, 1.0); // TODO: any way to avoid this clone?
+
         let mut revmap = vec![0; kmers_hashes.len()];
         for hash in &kmers_hashes {
             revmap[mphf.lookup(*hash).unwrap() as usize] = *hash;
@@ -68,7 +80,7 @@ impl<'a> UKHS {
         Ok(UKHS {
             k,
             w,
-            mphf,
+            mphf: Arc::new(mphf),
             revmap,
             kmers,
             kmers_hashes,
@@ -79,14 +91,6 @@ impl<'a> UKHS {
         self.kmers_hashes.len()
     }
 
-    pub fn k(&self) -> usize {
-        self.k
-    }
-
-    pub fn w(&self) -> usize {
-        self.w
-    }
-
     pub fn query_bucket(&self, hash: u64) -> Option<usize> {
         if let Some(pos) = self.mphf.lookup(hash) {
             if self.revmap[pos as usize] == hash {
@@ -94,6 +98,96 @@ impl<'a> UKHS {
             }
         }
         None
+    }
+
+    pub fn contains(&self, hash: u64) -> bool {
+        if let Some(pos) = self.mphf.lookup(hash) {
+            if self.revmap[pos as usize] == hash {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn contains_kmer(&self, kmer: &str) -> bool {
+        self.kmers.binary_search(&kmer.into()).is_ok()
+    }
+
+    pub fn kmer_for_ukhs_hash(&self, hash: u64) -> Option<String> {
+        if let Some(pos) = self.kmers_hashes.iter().position(|&x| x == hash) {
+            Some(self.kmers[pos].clone())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(feature = "boomphf_mphf")]
+impl<'a> UKHS {
+    pub fn new(k: usize, w: usize) -> Result<UKHS, Error> {
+        if k > w {
+            return Err(UKHSError::KSizeOutOfWRange { ksize: k, wsize: w }.into());
+        }
+
+        let w_round = (w / 10) * 10;
+        let entries = UKHS_HASHES[&(k, w_round)];
+        let mut kmers: Vec<String> = entries
+            .split('\n')
+            .filter_map(|s| {
+                if s.len() == k {
+                    Some(String::from(s))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // TODO: is the order relevant for interoperability?
+        // for now this is necessary to make binary_search work
+        kmers.sort_unstable();
+
+        let kmers_hashes: Vec<u64> = kmers.iter().map(|h| ntf64(h.as_bytes(), 0, k)).collect();
+
+        let mphf = MPHF::new(kmers_hashes, kmers);
+
+        Ok(UKHS {
+            k,
+            w,
+            mphf: Arc::new(mphf),
+            revmap: Vec::default(),
+            kmers: Vec::default(),
+            kmers_hashes: Vec::default(),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.mphf.len()
+    }
+
+    pub fn query_bucket(&self, hash: u64) -> Option<usize> {
+        self.mphf.get_key_id(&hash)
+    }
+
+    pub fn contains(&self, hash: u64) -> bool {
+        self.mphf.get_key_id(&hash).is_some()
+    }
+
+    pub fn contains_kmer(&self, kmer: &str) -> bool {
+        self.mphf.iter().any(|(_, v)| v == kmer)
+    }
+
+    pub fn kmer_for_ukhs_hash(&self, hash: u64) -> Option<String> {
+        self.mphf.get(&hash).cloned()
+    }
+}
+
+impl<'a> UKHS {
+    pub fn k(&self) -> usize {
+        self.k
+    }
+
+    pub fn w(&self) -> usize {
+        self.w
     }
 
     /// Creates a new UKHSIterator with internal state properly initialized.
@@ -165,27 +259,6 @@ impl<'a> UKHS {
             max_k_pos,
             current_unikmers,
         })
-    }
-
-    pub fn contains(&self, hash: u64) -> bool {
-        if let Some(pos) = self.mphf.lookup(hash) {
-            if self.revmap[pos as usize] == hash {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn contains_kmer(&self, kmer: &str) -> bool {
-        self.kmers.binary_search(&kmer.into()).is_ok()
-    }
-
-    pub fn kmer_for_ukhs_hash(&self, hash: u64) -> Option<String> {
-        if let Some(pos) = self.kmers_hashes.iter().position(|&x| x == hash) {
-            Some(self.kmers[pos].clone())
-        } else {
-            None
-        }
     }
 }
 
