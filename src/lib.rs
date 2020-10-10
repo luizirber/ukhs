@@ -1,4 +1,5 @@
 #![allow(clippy::unreadable_literal)]
+#![allow(clippy::len_without_is_empty)]
 
 pub mod errors;
 
@@ -7,22 +8,19 @@ use std::iter::Peekable;
 use std::str;
 
 use bbhash::MPHF;
-use failure::{Error, SyncFailure};
-use lazy_static::lazy_static;
 use nthash::{ntf64, NtHashForwardIterator};
+use once_cell::sync::Lazy;
 
-use crate::errors::UKHSError;
+pub use crate::errors::UKHSError as Error;
 
-lazy_static! {
-    static ref UKHS_HASHES: HashMap<(usize, usize), &'static str> = {
-        let mut map = HashMap::new();
-        map.insert((7, 20), include_str!("../data/res_7_20_4_0.txt"));
-        map.insert((9, 20), include_str!("../data/res_9_20_4_0.txt"));
-        map.insert((9, 30), include_str!("../data/res_9_30_4_0.txt"));
-        // TODO: add others
-        map
-    };
-}
+static UKHS_HASHES: Lazy<HashMap<(usize, usize), &'static str>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    map.insert((7, 20), include_str!("../data/res_7_20_4_0.txt"));
+    map.insert((9, 20), include_str!("../data/res_9_20_4_0.txt"));
+    map.insert((9, 30), include_str!("../data/res_9_30_4_0.txt"));
+    // TODO: add others
+    map
+});
 
 #[derive(Clone)]
 pub struct UKHS {
@@ -37,7 +35,7 @@ pub struct UKHS {
 impl<'a> UKHS {
     pub fn new(k: usize, w: usize) -> Result<UKHS, Error> {
         if k > w {
-            return Err(UKHSError::KSizeOutOfWRange { ksize: k, wsize: w }.into());
+            return Err(Error::KSizeOutOfWRange { ksize: k, wsize: w });
         }
 
         let w_round = (w / 10) * 10;
@@ -118,27 +116,21 @@ impl<'a> UKHS {
     /// Creates a new UKHSHashIterator with internal state properly initialized.
     pub fn hash_iter_sequence(&'a self, seq: &'a [u8]) -> Result<UKHSHashIterator<'a>, Error> {
         if self.k > seq.len() {
-            return Err(UKHSError::KSizeOutOfRange {
+            return Err(Error::KSizeOutOfRange {
                 ksize: self.k,
                 sequence: String::from_utf8(seq.to_vec()).unwrap(),
-            }
-            .into());
+            });
         }
 
         if self.w > seq.len() {
-            return Err(UKHSError::WSizeOutOfRange {
+            return Err(Error::WSizeOutOfRange {
                 wsize: self.w,
                 sequence: String::from_utf8(seq.to_vec()).unwrap(),
-            }
-            .into());
+            });
         }
 
-        let mut nthash_k_iter = NtHashForwardIterator::new(seq, self.k)
-            .map_err(SyncFailure::new)?
-            .peekable();
-        let mut nthash_w_iter = NtHashForwardIterator::new(seq, self.w)
-            .map_err(SyncFailure::new)?
-            .peekable();
+        let mut nthash_k_iter = NtHashForwardIterator::new(seq, self.k)?.peekable();
+        let mut nthash_w_iter = NtHashForwardIterator::new(seq, self.w)?.peekable();
 
         let current_w_hash = nthash_w_iter.next().unwrap();
         let mut current_unikmers = VecDeque::with_capacity(self.k);
@@ -192,10 +184,9 @@ impl<'a> UKHS {
 /// An iterator for finding universal hitting k-mers in a sequence.
 ///
 /// ```
-///     # use failure::Error;
 ///     use ukhs::UKHS;
 ///
-///     # fn main() -> Result<(), Error> {
+///     # fn main() -> Result<(), ukhs::Error> {
 ///     let seq = b"ACACCGTAGCCTCCAGATGC";
 ///     let ukhs = UKHS::new(7, 20)?;
 ///
@@ -259,10 +250,9 @@ impl<'a> ExactSizeIterator for UKHSIterator<'a> {}
 /// It uses ntHash for efficient k-mer hashing.
 ///
 /// ```
-///     # use failure::Error;
 ///     use ukhs::UKHS;
 ///
-///     # fn main() -> Result<(), Error> {
+///     # fn main() -> Result<(), ukhs::Error> {
 ///     let seq = b"ACACCGTAGCCTCCAGATGC";
 ///     let ukhs = UKHS::new(7, 20)?;
 ///
@@ -283,10 +273,9 @@ impl<'a> ExactSizeIterator for UKHSIterator<'a> {}
 /// from) you can also collect only the UKHS hashes:
 ///
 /// ```
-///     # use failure::Error;
 ///     use ukhs::UKHS;
 ///
-///     # fn main() -> Result<(), Error> {
+///     # fn main() -> Result<(), ukhs::Error> {
 ///     let ukhs = UKHS::new(7, 20)?;
 ///     let seq = b"ACACCGTAGCCTCCAGATGC";
 ///     let it = ukhs.hash_iter_sequence(seq)?;
@@ -392,9 +381,9 @@ mod test {
 
         let it = ukhs.hash_iter_sequence(seq).unwrap();
         let ukhs_hash: Vec<(u64, u64)> = it.collect();
-        assert!(ukhs_hash.len() >= seq.len() - w + 1);
+        assert!(ukhs_hash.len() > seq.len() - w);
 
-        let mut ukhs_unhash_set: HashSet<String> = ukhs_hash
+        let ukhs_unhash_set: HashSet<String> = ukhs_hash
             .iter()
             .map(|(_, hash)| ukhs.kmer_for_ukhs_hash(*hash).unwrap())
             .collect();
@@ -436,7 +425,7 @@ mod test {
         let ukhs = UKHS::new(k, w).unwrap();
 
         let it = ukhs.iter_sequence(seq);
-        let mut unikmers: Vec<String> = it.map(|(_, x)| x).collect();
+        let unikmers: Vec<String> = it.map(|(_, x)| x).collect();
 
         assert_eq!(
             unikmers,
@@ -453,13 +442,13 @@ mod test {
         let ukhs_hash: Vec<(u64, u64)> = it.collect();
 
         assert!(
-            ukhs_hash.len() >= seq.len() - w + 1,
+            ukhs_hash.len() > seq.len() - w,
             "iter len {}, should be at least {}",
             ukhs_hash.len(),
             seq.len() - w + 1
         );
 
-        let mut ukhs_unhash: Vec<String> = ukhs_hash
+        let ukhs_unhash: Vec<String> = ukhs_hash
             .iter()
             .map(|(_, hash)| ukhs.kmer_for_ukhs_hash(*hash).unwrap())
             .collect();
